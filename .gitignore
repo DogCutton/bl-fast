@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Blender 保存时自动生成的备份
+*.blend1
+*.blend2
+*.blend@

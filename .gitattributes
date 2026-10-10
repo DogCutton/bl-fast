@@ -1,0 +1,5 @@
+# 统一换行符，避免 Windows/Linux 之间来回产生整文件 diff
+* text=auto eol=lf
+
+*.py text diff=python
+*.md text
