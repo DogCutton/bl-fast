@@ -248,6 +248,35 @@ img.pixels.foreach_get(px)                      # 实测 320x240 RGBA 可读
 
 这是「AI 看到渲染结果」的完整闭环：**渲染 → 落盘 → 读像素（或直接看图）**。
 
+## 让界面刷新
+
+**数据层修改不会自动设置重绘标记**，所以用户的视口会停在旧画面上，直到有事件
+（鼠标移动等）路过。`Edit` 默认在退出时强制刷新（`redraw=True`）。
+
+实测（Blender 5.2.1）：
+
+| 调用 | 结果 |
+|---|---|
+| `bpy.context.screen.tag_redraw()` | ✗ **不存在**（`AttributeError`） |
+| `area.tag_redraw()` × 4 | ✓ 0.05 ms（只设标记，异步） |
+| `bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)` | ✓ **0.15 ms**，同步绘制并交换缓冲 |
+
+所以刷新要两步：先 `area.tag_redraw()` 设标记，再 `redraw_timer` 强制同步一次。
+实测 24 帧连续刷新共 392.8 ms，每帧 0.15 ms —— 便宜到可以在动画循环里用。
+
+```python
+with bf.Edit("ai: ..."):                  # 默认 redraw=True
+    ...改动...
+# 退出时: view_layer.update() -> tag_redraw() xN -> redraw_timer
+
+with bf.Edit("ai: ...", redraw=False):    # 后台任务可以关掉
+    ...
+```
+
+**一个容易误判的点**：截图工具（`get_viewport_screenshot`）**总会**看到最新状态，
+因为它自己会强制 draw。所以「截图能看到」不等于「用户能看到」——
+验证界面刷新**不能靠截图**，只能靠人看。
+
 ## 已知限制
 
 - **`bpy.ops` 不可替代的场合**：`mode_set`（进编辑/雕刻模式）、渲染、导出、部分编辑器操作。

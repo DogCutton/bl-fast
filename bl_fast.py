@@ -312,19 +312,23 @@ class Edit(object):
       * undo 快照约 0.2-0.9 MB/步（改网格时每步整份重写），栈上限 32 步
 
     undo 本身不是事务 —— 它不会在异常时自己回滚，所以才有 rollback_on_error。
+
+    退出时会强制刷新界面（redraw=True）：数据层修改不会自动设置重绘标记，
+    不刷新的话你的视口会停在旧画面上，直到有事件（鼠标移动等）路过。
     """
 
-    __slots__ = ("label", "undo", "rollback_on_error", "verify",
+    __slots__ = ("label", "undo", "rollback_on_error", "verify", "redraw",
                  "committed", "rolled_back")
 
     def __init__(self, label="ai edit", undo=True, rollback_on_error=True,
-                 verify=None):
+                 verify=None, redraw=True):
         self.label = label
         self.undo = undo
         self.rollback_on_error = rollback_on_error
         self.verify = verify
         self.committed = False
         self.rolled_back = False
+        self.redraw = redraw
 
     def __enter__(self):
         # 在编辑之前 push：这是「编辑前状态」的唯一精确还原点。
@@ -341,6 +345,7 @@ class Edit(object):
             except BaseException:
                 self._rollback()      # 校验失败也算失败，一样回滚
                 raise
+            self._notify_ui()
             self.committed = True
             return False
         self._rollback()
@@ -351,3 +356,28 @@ class Edit(object):
             bpy.ops.ed.undo()
             self.rolled_back = True
         bpy.context.view_layer.update()
+        self._notify_ui()
+
+    def _notify_ui(self):
+        """把改动推给界面 —— 数据层修改不会自动设置重绘标记。
+
+        实测（Blender 5.2.1）：
+          * `bpy.data` 的直接修改不设置 redraw 标记，所以窗口停在旧画面，
+            直到有事件（鼠标移动等）路过
+          * `Screen` 没有 `tag_redraw()`（AttributeError），必须逐个 area 调
+          * `bpy.ops.wm.redraw_timer(DRAW_WIN_SWAP)` 会真的同步绘制并交换
+            缓冲（它自己打印 "Draw window and swap: 0.0252 ms"），约 2.4 ms/次
+          * 截图工具总是看到最新状态，因为它自己会强制 draw ——
+            所以「截图能看到」不等于「用户能看到」
+        """
+        if not self.redraw:
+            return
+        try:
+            sc = bpy.context.screen
+            if sc is None:          # 后台/无头模式没有 screen
+                return
+            for area in sc.areas:
+                area.tag_redraw()
+            bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
+        except Exception:
+            pass
