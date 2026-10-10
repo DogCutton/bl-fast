@@ -152,10 +152,108 @@ with bf.Edit("ai: 波浪变形"):
     bf.set_positions(mesh, p)           # 一次写回
 ```
 
+## 这个路径不能做什么
+
+实测边界（Blender 5.2.1 / Windows 10），不是推测。
+
+### 上下文是「裸」的（必须先搭桥）
+
+`execute_code` 运行时 `area` / `region` / `space_data` 全是 `None`，所以一部分
+`bpy.ops` 的 poll 会失败：
+
+| ops | poll |
+|---|---|
+| `object.mode_set` | **false**（设了活动对象后变 **true**） |
+| `graph.select_all` | false（当前没有 GRAPH 区域） |
+| `transform.translate` / `mesh.primitive_cube_add` / `render.render` | true |
+
+所以规则不是「做不到」，而是**先搭桥**：
+`bpy.context.view_layer.objects.active = obj` + `obj.select_set(True)`，
+或 `bpy.context.temp_override(window=..., area=..., region=...)`（实测可用）。
+
+### 编辑模式下的顶点写入会被静默丢弃 ★
+
+8 顶点临时网格，编辑模式下：
+
+| 阶段 | 读回 |
+|---|---|
+| 写入全零后，**编辑模式内**读回 | `0.0` ← 看起来成功了 |
+| **退出编辑模式后**读回 | `12.0` ← 原值回来了 |
+
+API 不报错、读回也对、结果无效 —— 最危险的一类失败。
+因为编辑期间几何的真源是 **BMesh**，`mesh.vertices` 只是投影。
+`set_positions` 现在会在入口抛 `RuntimeError` 拦住它；要么先退出编辑模式，
+要么改用 `bmesh`。
+
+### 求值副本是「假的可写」
+
+```
+ev.location = (1,1,1)              -> OK（不报错）
+ev.data.vertices[0].co = (1,1,1)   -> OK（不报错）
+ev.data is orig.data               -> false
+```
+
+写得进，但下次求值就覆盖，且**不进撤销栈、不保存**。
+
+### 只读属性
+
+| 尝试 | 结果 |
+|---|---|
+| `obj.users = 5` | ✗ read-only |
+| `mesh.vertices = None` | ✗ read-only |
+| `obj.matrix_world = ...` | ✓ 可写 |
+| `obj.data = ...` | ✓ 可写 |
+
+### 结构性限制（绕不过）
+
+- **模态操作**：无法启动 modal operator 并用事件驱动（需要事件循环）
+- **鼠标/键盘注入**：没有 API（除非 `ctypes`）
+- **不能中断**：`exec` 阻塞，死循环只能等（**推断**，未实测）
+- **撤销栈历史**：只能 push / undo，不能编辑
+- **GPU 显存 / 视口内部状态**：只能截图
+
+### 状态存在哪
+
+| 载体 | 跨调用持久 |
+|---|---|
+| `exec` 的裸变量 | ✗（命名空间每次新建，只预置 `bpy`） |
+| **模块属性**（`sys.modules`） | ✓（实测计数 1 → 2） |
+| 文件系统 | ✓ |
+| Blender 场景 | ✓ |
+
+## 在里面渲染
+
+| 方式 | 实测耗时（320×240） | 用途 |
+|---|---|---|
+| `bpy.ops.render.opengl(write_still=True)` | **48.9 ms** | 快速预览 |
+| `bpy.ops.render.render(write_still=True)` **首次** | **27 973 ms** | 正式渲染（含着色器编译） |
+| 同上，**第二次及以后** | **1 586 ms** | 比首次快 **17.6×** |
+| `gpu.types.GPUOffScreen(w, h)` | 可用 | 离屏，最程序化 |
+
+**首次渲染的 28 秒几乎全是一次性成本**（着色器编译 / GPU 上下文初始化），
+别拿它去估计后续渲染。
+
+**关键限制**：`bpy.data.images["Render Result"]` **读不到** —— 实测无论渲染前后，
+它的 `size` 恒为 `[0, 0]`、`pixels` 长度为 0。所以渲染结果**必须落盘再从文件读**：
+
+```python
+scene.render.filepath = r"...\out.png"
+scene.render.image_settings.file_format = "PNG"
+bpy.ops.render.render(write_still=True)
+
+img = bpy.data.images.load(r"...\out.png")     # 从文件读回
+px = np.empty(len(img.pixels), dtype=np.float32)
+img.pixels.foreach_get(px)                      # 实测 320x240 RGBA 可读
+```
+
+这是「AI 看到渲染结果」的完整闭环：**渲染 → 落盘 → 读像素（或直接看图）**。
+
 ## 已知限制
 
 - **`bpy.ops` 不可替代的场合**：`mode_set`（进编辑/雕刻模式）、渲染、导出、部分编辑器操作。
   正确的规则不是"永远别用 ops"，而是"**ops 只用在数据层没有替代的地方**"。
+- **编辑模式下改顶点会被静默丢弃**：`set_positions` 已加守卫（抛 `RuntimeError`）。
+  编辑期间几何归 BMesh 所有，必须改用 `bmesh` 或先退出编辑模式。
 - **`mesh_from_arrays` 要求等长面**（全三角或全四边）。混合拓扑得走 bmesh。
 - **校验是选择性的**：`set_positions` 只校验**形状**（拦住静默错误），
   要证明数值真的写进去了得用 `set_positions_checked`（多一次 memcpy）。

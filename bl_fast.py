@@ -63,6 +63,23 @@ def _shaped(arr, n, cols, what):
     return a
 
 
+def _check_editable(mesh, what):
+    """编辑模式下对 mesh.vertices 的写入会被静默丢弃。
+
+    实测（Blender 5.2.1，8 顶点临时网格）：编辑模式下 set_positions 写入全零，
+    读回 0.0（看起来成功），退出编辑模式后读回 12.0 —— 原值回来了。
+    API 不报错、读回也对、结果无效，所以必须在入口拦住。
+
+    真源是 BMesh：编辑期间几何归 bmesh 所有，mesh.vertices 只是它的投影。
+    """
+    if mesh.is_editmode:
+        raise RuntimeError(
+            "%s: mesh.is_editmode 为真 —— 编辑模式下几何的真源是 BMesh，"
+            "改 mesh.vertices 会被静默丢弃。请先退出编辑模式"
+            "（bpy.ops.object.mode_set(mode='OBJECT')），或改用 bmesh"
+            % what)
+
+
 # ------------------------------------------------------------------ 读取
 def positions(mesh):
     """顶点位置 -> (N, 3) float32"""
@@ -110,6 +127,7 @@ def attr_scalar(mesh, name, dtype=np.float32):
 # ------------------------------------------------------------------ 写入
 def set_positions(mesh, arr):
     """一次写入全部顶点位置。不触发依赖图（交给 Edit 统一提交）"""
+    _check_editable(mesh, "set_positions")
     mesh.vertices.foreach_set(
         "co",
         _flat(_shaped(arr, len(mesh.vertices), 3, "set_positions"), np.float32))
