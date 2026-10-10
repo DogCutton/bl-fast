@@ -43,13 +43,15 @@ Blender 有两套入口：给**手指**用的 `bpy.ops`（菜单按钮背后那�
 - 位置数组 `np.allclose(..., atol=1e-6)` 通过
 - 拓扑一致：两条建网格路径都得到 300000 顶点 / 300000 边 / 100000 面
 
-## 设计三原则
+## 设计四原则
 
 1. **批量**：numpy 进 / numpy 出。绝不写 `for v in mesh.vertices`
 2. **延迟**：编辑期间不碰依赖图，退出 `with` 块时一次性提交
-3. **事务**：一段编辑 = 一个 undo 步骤，而不是每一步一个
+3. **撤销单位**：一段编辑 = 一次 Ctrl+Z，而不是每一步一次
+4. **失败即回滚**：`Edit` 块内任何异常（含校验失败）都自动退回编辑前状态
 
-三条都从同一句话推出来：**固定成本与批量大小无关，所以把它摊薄。**
+前三条从同一句话推出来：**固定成本与批量大小无关，所以把它摊薄。**
+第四条来自另一句话：**undo 不是事务 —— 它不会自己回滚。**
 
 ## 加载
 
@@ -77,7 +79,8 @@ import bl_fast as bf
 
 | 函数 | 说明 |
 |---|---|
-| `set_positions(mesh, arr)` | 一次写入全部顶点位置 |
+| `set_positions(mesh, arr)` | 一次写入全部顶点位置（**校验形状**） |
+| `set_positions_checked(mesh, arr)` | 同上，写完后回读比对，慢约一倍 |
 | `transform_mesh(mesh, matrix)` | 4×4 矩阵批量变换（在 numpy 里算完再写回） |
 | `offset_mesh(mesh, delta)` | 平移所有顶点 |
 
@@ -85,7 +88,7 @@ import bl_fast as bf
 
 | 函数 | 说明 |
 |---|---|
-| `mesh_from_arrays(name, verts, faces)` | 从 numpy 直建网格，绕开 `from_pydata` |
+| `mesh_from_arrays(name, verts, faces)` | 从 numpy 直建网格，绕开 `from_pydata`；**建完自动做拓扑校验** |
 | `cube_mesh(name, size)` | 立方体（8 顶点 / 6 四边面） |
 | `grid_mesh(name, nx, ny, size)` | 规则四边形网格 |
 
@@ -103,12 +106,25 @@ import bl_fast as bf
 ### 事务
 
 ```python
-with bf.Edit("ai: scatter cubes", undo=True):
+with bf.Edit("ai: scatter cubes"):      # undo=True 默认
     ...
-# 退出时统一做 view_layer.update() 一次 + undo_push() 一次
+# 进入时:  在编辑之前留下还原点（undo_push）
+# 退出时:  view_layer.update() 一次
+# 异常时:  自动 bpy.ops.ed.undo() 退回进入时的状态
 ```
 
-`undo=False` 时不进撤销栈（适合纯计算或临时对象）。
+**为什么在「进入时」push 而不是「退出时」**：实测（Blender 5.2.1）—— 进入时 push 一次
++ 之后多次数据层修改，一次 Ctrl+Z 恰好回到进入时的状态；反过来若退出时才 push，
+异常路径会跳过「编辑前」状态，一次 Ctrl+Z 会退到更早的地方。
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `undo` | `True` | 是否参与撤销栈。`False` 适合纯计算/临时对象 |
+| `rollback_on_error` | `True` | 异常时是否自动回滚 |
+| `verify` | `None` | 成功时的校验回调；它抛异常同样触发回滚 |
+
+**undo 本身不是事务**，它不会在异常时自己回滚，所以才有 `rollback_on_error`。
+实测：块内把值改到 9.0 后抛异常，回滚后读回 0.0（`rolled_back=True, committed=False`）。
 
 ## 用法
 
@@ -141,7 +157,13 @@ with bf.Edit("ai: 波浪变形"):
 - **`bpy.ops` 不可替代的场合**：`mode_set`（进编辑/雕刻模式）、渲染、导出、部分编辑器操作。
   正确的规则不是"永远别用 ops"，而是"**ops 只用在数据层没有替代的地方**"。
 - **`mesh_from_arrays` 要求等长面**（全三角或全四边）。混合拓扑得走 bmesh。
-- **无回读校验**。写完之后库不自证结果，调用方需要自己读回来验证。
+- **校验是选择性的**：`set_positions` 只校验**形状**（拦住静默错误），
+  要证明数值真的写进去了得用 `set_positions_checked`（多一次 memcpy）。
+- **`mesh_from_arrays` 的校验有价格**：`validate=True`（默认）实测让建 10 万三角面
+  从 72.5 ms 变成 100.3 ms（**+38.5%**）。要极限吞吐就传 `validate=False`，
+  代价是失去越界索引 / 退化面的守卫。
+- **回滚依赖 undo 栈**：`rollback_on_error` 靠 `bpy.ops.ed.undo()` 实现，
+  所以 `undo=False` 时它无效；回滚精度也受撤销栈状态影响（栈满后是环形淘汰）。
 - **`spawn_linked` 共享 mesh**：改一个对象的几何等于改全部。要独立几何请用 `spawn_many`。
 - **撤销有硬顶**：`undo_steps` 默认 32，一次 `Edit` 占一步。改网格的每步快照约 0.8 MB
   （40 万顶点实测），栈满后环形淘汰。
@@ -156,3 +178,6 @@ with bf.Edit("ai: 波浪变形"):
 DNA 与属性化存储、Copy-on-Write 惰性求值、撤销的环形缓冲与快照成本、
 `bpy.ops` 与数据层的成本解剖。
 所有数字均为本机 Release 构建实测，**换版本或换构建（debug/ASAN）不保证成立**。
+
+单次测量的方差不小：同一个「创建 200 对象」基准先后跑出 21.49 ms 与 10.22 ms。
+没有重复取中位数，也没有误差棒 —— 这些数字应当读作量级，而不是精确值。
