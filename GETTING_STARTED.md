@@ -180,6 +180,7 @@ Blender 的 traceback 是完整的。**真正的原因通常在最后几行**，
 | **内存看提交量，不看工作集** | 工作集会被系统裁掉，能测出"负增长" |
 | **无头模式下 `undo` 不可用** | `bpy.ops.ed.undo.poll()` 为 False——回滚能力**必须先探测**，不能假设 |
 | **撤销栈清不掉** | 操作一旦进去就留在那里。**动手前先让文件存盘** |
+| **undo 之后别再用手里的引用** ⚠️ | 实测：`undo()` 后复用缓存的 `bpy` 引用，会**静默读到陈旧值**（或抛 `ReferenceError: StructRNA ... has been removed`）。读值时用 `bpy.data.objects["Cube"]` 重新取 |
 | **`bpy.ops` 在脚本里常 poll 失败** | 不是"做不到"，是"先搭桥"：设活动对象，或用 `temp_override` |
 
 ---
