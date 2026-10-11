@@ -13,7 +13,7 @@
   "blender.executables": [
     {
       // ⚠️ 换成你自己机器上的 Blender 路径（下面这个只是打包者的）
-      "path": "E:\\制冰\\Blender\\Blender 5.2\\blender.exe",
+      "path": "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe",
       "name": "Blender 5.2.1 LTS",
       "args": []
     }

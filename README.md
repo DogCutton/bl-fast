@@ -15,6 +15,10 @@
 > **想自己动手？** → [GETTING_STARTED.md](GETTING_STARTED.md)
 > 三条路（VSCode 扩展 / Blender 内建 / 命令行）+ 四个可跑练习 + 七个实测踩出来的坑。
 > 你的 VSCode 已经装好 `jacqueslucke.blender-development`，开箱可用。
+>
+> **想装上它？** → [INSTALL.md](INSTALL.md)
+> 单文件库：复制进 Blender 的 `scripts/modules` 就能 `import`，卸载 = 删掉那个文件，零依赖。
+> （或者不装 —— 每个练习脚本都能就地运行。）
 
 ## 动手前先报身份
 
