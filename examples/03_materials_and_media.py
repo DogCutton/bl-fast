@@ -8,9 +8,13 @@ import os
 import sys
 import bpy
 
-BL_FAST = r"F:\DeepSeek Harness Workspace\tools\bl-fast"
-if BL_FAST not in sys.path:
-    sys.path.append(BL_FAST)
+try:
+    import os.path as _osp
+    _ROOT = _osp.dirname(_osp.dirname(_osp.abspath(__file__)))
+except NameError:          # Blender 的 Text Editor 里没有 __file__
+    _ROOT = r"F:\DeepSeek Harness Workspace\tools\bl-fast"
+if _ROOT not in sys.path:
+    sys.path.append(_ROOT)
 import bl_fast as bf
 
 # 换成你自己的图片路径

@@ -12,9 +12,13 @@ import os
 import sys
 import bpy
 
-BL_FAST = r"F:\DeepSeek Harness Workspace\tools\bl-fast"
-if BL_FAST not in sys.path:
-    sys.path.append(BL_FAST)
+try:
+    import os.path as _osp
+    _ROOT = _osp.dirname(_osp.dirname(_osp.abspath(__file__)))
+except NameError:          # Blender 的 Text Editor 里没有 __file__
+    _ROOT = r"F:\DeepSeek Harness Workspace\tools\bl-fast"
+if _ROOT not in sys.path:
+    sys.path.append(_ROOT)
 
 print("=" * 62)
 print("① 会话身份（任何改动之前先看这个）")
