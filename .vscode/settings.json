@@ -1,35 +1,31 @@
 {
   // VSCode + Blender 开发配置
-  // 扩展：jacqueslucke.blender-development（已安装）
+  // 扩展：jacqueslucke.blender-development
   //
   // 用法：
-  //   1. 用 VSCode 打开 tools/bl-fast 这个文件夹
+  //   1. 用 VSCode 打开这个文件夹（tools/bl-fast）
   //   2. Ctrl+Shift+P -> "Blender: Start"
-  //   3. 打开 examples/ 里的任意脚本 -> Ctrl+Shift+P -> "Blender: Run Script"
+  //   3. 打开 examples/ 里的脚本 -> Ctrl+Shift+P -> "Blender: Run Script"
   //
-  // 注意：扩展启动的是**它自己管理的 Blender 实例**（带调试端口），
-  // 和你手动开后连着 MCP 的那个是两回事。两者可以同时存在。
+  // ⚠️ 这里刻意**不放** blender.executables 和 python.analysis.extraPaths。
+  //    那两项是「每台机器都不同」的（Blender 装在哪、什么版本），
+  //    放进版本库只会让所有人——包括你自己换机器之后——拿到一堆不存在的路径。
+  //
+  //    更要命的是 VSCode 的优先级：
+  //        工作区(.vscode/settings.json)  >  用户级(%APPDATA%/Code/User)
+  //    所以工作区里写错一份，会**压住**你用户级里那份正确的，
+  //    然后 "Blender: Start" 失败，而错误信息**不会**告诉你用户级里其实有对的。
+  //
+  //    那两项请配在**用户级**：
+  //        Ctrl+Shift+P -> "Preferences: Open User Settings (JSON)"
+  //    配法见 INSTALL.md 的「配置 VSCode 指向你的 Blender」。
 
-  "blender.executables": [
-    {
-      // ⚠️ 换成你自己机器上的 Blender 路径（下面这个只是打包者的）
-      "path": "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe",
-      "name": "Blender 5.2.1 LTS",
-      "args": []
-    }
-  ],
-
-  // examples/ 里的脚本可以在扩展的 "Open Scripts Folder" 里直接看到
+  // examples/ 里的脚本可以在扩展的 "Open Scripts Folder" 里直接看到。
+  // 这是相对路径，对别人也成立，所以留在工作区里没问题。
   "blender.scripts.directories": ["examples"],
 
   // 保存插件源码时自动重载（做 addon 开发时有用）
   "blender.addon.reloadOnSave": false,
-
-  // Blender 的脚本目录，给 Pylance 一点线索（bpy 本身仍需要 fake-bpy-module 才有补全）
-  "python.analysis.extraPaths": [
-    "E:\\制冰\\Blender\\Blender 5.2\\5.2\\scripts\\modules",
-    "E:\\制冰\\Blender\\Blender 5.2\\5.2\\scripts\\startup"
-  ],
 
   // 源码统一 UTF-8 + LF（避免中文注释在 Blender 里变乱码）
   "files.encoding": "utf8",

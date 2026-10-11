@@ -135,6 +135,54 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
 
 ---
 
+## 配置 VSCode 指向你的 Blender
+
+`.vscode/settings.json`（跟着仓库走的那份）**刻意不包含** `blender.executables` 和
+`python.analysis.extraPaths` —— 这两项是「Blender 装在哪、什么版本」，**每台机器都不同**，
+放进版本库只会让所有人（包括你自己换机器后）拿到一堆不存在的路径。
+
+**它们要配在「用户级」settings.json 里**：
+
+```
+Ctrl+Shift+P  →  "Preferences: Open User Settings (JSON)"
+```
+
+```json
+{
+  "blender.executables": [
+    {
+      "name": "Blender 5.2.1 LTS",
+      "path": "E:\\制冰\\Blender\\Blender 5.2\\blender.exe",
+      "isDefault": true
+    }
+  ],
+  "python.analysis.extraPaths": [
+    "E:\\制冰\\Blender\\Blender 5.2\\5.2\\scripts\\modules",
+    "E:\\制冰\\Blender\\Blender 5.2\\5.2\\scripts\\startup"
+  ]
+}
+```
+
+（路径换成你自己的。工作区里留着的 `blender.scripts.directories` 是**相对路径**，对别人也成立。）
+
+### ⚠️ 为什么非要分开放
+
+VSCode 的配置优先级是：
+
+```
+工作区（.vscode/settings.json）  >  用户级（%APPDATA%/Code/User）  >  默认值
+```
+
+所以如果**工作区里也写了** `blender.executables`，它会**压住**用户级那份。
+工作区指向一个不存在的路径时：
+
+- `Blender: Start` 失败（`shell 可执行文件的路径不存在`）
+- 而**错误信息完全不会提到**「你用户级里其实有一份对的」
+
+这个坑本项目踩过一次 —— 工作区里留的是打包者的机器路径，别人拿到就必然撞上。
+
+---
+
 ## 本机实测记录
 
 安装脚本在这台机器上跑过，结果如下（Blender 5.2.1 LTS）：
