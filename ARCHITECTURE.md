@@ -60,6 +60,48 @@ GHOST → 屏幕
 
 **③ 的一个直接后果**：`execute_code` 的**返回值不会被传回**，只有 stdout 被捕获。所以任何"返回结果"都必须 `print()` 出来。
 
+#### 哪些是「通道特性」，哪些是「Blender 特性」
+
+这个区分很重要：上面有些现象属于 **blender_mcp 这个具体实现**，换掉通道就不成立。
+
+| 现象 | 归属 | 依据 |
+|---|---|---|
+| 返回值不传回、只有 stdout | **blender_mcp 的实现**（`redirect_stdout`） | 读源码 |
+| 命名空间每次新建、只预置 `bpy` | **blender_mcp 的实现** | 读源码 |
+| `area` / `region` / `space_data` 为 `None` | 更可能是**脚本环境固有** | 待验证 |
+| `--background` 下仍有 `screen` / `window` | **Blender 的行为** | 独立进程实测 |
+| 模块状态跨调用保留 | **Blender 的**（同一个 Python 进程） | 独立验证 |
+
+#### 执行通道可替换（实测）
+
+bl_fast **不依赖 MCP**。用一个完全独立的进程验证过：
+
+```
+blender.exe --background --factory-startup --python standalone_test.py
+```
+
+`--factory-startup` 会禁用所有插件，所以那个进程里 `mcp_loaded: false`。结果：**6/6 全部成功** ——
+建模、批量写顶点、批量建对象、`Edit` 事务（无头模式下 `undo_push` 可用）、
+`describe/snapshot/patch`、以及无头渲染（14308 字节 PNG）。
+
+| 通道 | 需要什么 | 适用 |
+|---|---|---|
+| MCP | blender_mcp 插件 | AI 实时双向 |
+| `blender --background --python` | **什么都不需要** | 批处理 / CI / 无人值守 |
+| Text Editor / Python Console | 人工 | 手动执行 |
+| 自建 socket + `bpy.app.timers` | 一个小插件 | 定制通道 |
+
+#### 一个意外发现：schema 依赖环境
+
+同一个 Blender 版本、同一个 Cube，`describe(writable_only=True)` 的结果**不同**：
+
+| 环境 | 可写字段 | snapshot 字段 |
+|---|---|---|
+| 完整用户环境 | **109** | 99 |
+| `--factory-startup` | **96** | 87 |
+
+**所以 `describe()` 必须在目标环境里读，不能把别处读到的结论当常量。**
+
 ---
 
 ## 2. 工具经过的 Blender 分层
@@ -203,6 +245,62 @@ RNA 提供四类东西：
 | `undo_memory_limit` | `0` = **不限字节数，只由步数封顶** |
 
 **结论**：撤销内存上界 ≈ `min(步数, 32) × 单步快照`；且它**不随对象删除而释放**。
+
+### 2.9 节点系统与外部媒体
+
+节点编辑器**完全可以走数据层**（不需要 UI，也不需要 ops）。实测建一棵完整的材质节点树：
+
+```
+节点: 原理化 BSDF / 材质输出 / 图像纹理 / 纹理坐标 / 映射      (5 个)
+连接: 纹理坐标.UV -> 映射.Vector
+      映射.Vector -> 图像纹理.Vector
+      图像纹理.Color -> 原理化 BSDF.Base Color
+      原理化 BSDF.BSDF -> 材质输出.Surface                      (4 条)
+```
+
+**三个命名稳定性要点**（实测）：
+
+| 名字 | 是否稳定 | 实测 |
+|---|---|---|
+| `node.type` | ✅ 稳定 | `BSDF_PRINCIPLED` / `TEX_IMAGE` |
+| `socket.name` | ✅ 稳定（英文） | `Base Color` / `Vector` |
+| `node.name` | ❌ **随界面语言变** | 中文界面下是「原理化 BSDF」 |
+
+所以脚本里应该用 `type` 和 socket 名定位，**不要**用 `node.name` 匹配。
+
+**外部媒体导入**：`bpy.data.images.load()` 一个 API 覆盖三种来源。
+
+| 素材 | `image.source` | 实测 |
+|---|---|---|
+| PNG 图片 | `FILE` | 320×240, 4 通道, sRGB |
+| **MP4 视频** | **`MOVIE`** | 160×120, **`frame_duration = 3`** |
+| PNG 序列 | `SEQUENCE` | 赋 `source` 可切换；`frame_duration` **只读** |
+
+加载后接到 `ShaderNodeTexImage.image`，材质就生效了 —— 实测渲染出了一张静帧。
+
+**反向（Blender 输出视频）需要 `media_type`**，这是本节唯一的坑：
+
+```python
+r.image_settings.media_type = "VIDEO"      # ← 缺这一行，下面那句会被拒绝
+r.image_settings.file_format = "FFMPEG"
+r.ffmpeg.format = "MPEG4"; r.ffmpeg.codec = "H264"
+bpy.ops.render.render(animation=True)       # -> blender_out0001-0003.mp4
+```
+
+为什么容易踩：**`file_format` 的可用集合是动态的**。
+
+| 层级 | 表现 |
+|---|---|
+| `bpy.types.ImageFormatSettings.bl_rna...enum_items`（类型级） | **16 项，含 `FFMPEG`** |
+| `media_type = "IMAGE"` 时赋值 | **REJECTED**，错误只列 14 项 |
+| `media_type = "VIDEO"` 时赋值 | **ACCEPTED** |
+
+而且 `bpy.app.build_options.codec_ffmpeg` 一直是 `true`，目录里也确有
+`avcodec-62.dll`（36 MB）—— **编译支持存在 ≠ 当前上下文可用**。
+
+（本机另有一个独立 ffmpeg 8.0.1，可以用来生成/转码素材。）
+
+**这一节的意义**：节点、材质、媒体导入**全部**在数据层可达，不需要 UI 交互。
 
 ---
 
