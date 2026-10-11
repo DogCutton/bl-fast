@@ -122,7 +122,11 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
   ```powershell
   & "E:\制冰\Blender\Blender 5.2\5.2\python\bin\python.exe" -m pip install <wheel>
   ```
-  这条路径**我们没验证过**（本机那份 pip 的状态不明确），而"复制一个文件"已经足够可靠。
+  **这条路已实测可行**（Blender 5.2.1 自带 `pip 26.0.1`）：
+  `pip install --target <临时目录> --no-index <本地 wheel>` 成功装上了
+  `fake-bpy-module-5-2`（45 个 `*-stubs` 目录）。
+  ⚠️ 但 pip 走自己的 HTTP 栈，会被 Steam++ 这类中间人挡（`HTTP 403`）——
+  先用 PowerShell 下 wheel，再本地安装。
 - **Blender 扩展**：扩展会被加载成 `bl_ext.<repo>.<id>`，**裸 `import bl_fast` 不保证能用**
   （除非扩展内部改 `sys.path`）。对本项目来说是绕远路。
 

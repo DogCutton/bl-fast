@@ -192,12 +192,26 @@ VSCode 里 `import bpy` 默认**没有补全**，因为 `bpy` 不在任何标准
 要补全得装类型存根（社区维护）：
 
 ```powershell
-pip install fake-bpy-module-latest -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 按你的 Blender 版本选（推荐，精确匹配）
+pip install fake-bpy-module-5.2
 ```
 
-> **未验证**：本机没装过这个包，`fake-bpy-module-latest` 是否覆盖 Blender **5.2** 的 API
-> 我没有实测。不满意可以 `pip uninstall fake-bpy-module-latest` 回退。
-> （pypi 直连很慢，所以上面用了镜像。）
+> **已实测**（Blender 5.2.1 + 它自带的 pip 26.0.1）：
+>
+> - **按版本发布的包存在且精确**：`fake-bpy-module-5.2`（最新 `20260730`）
+> - `fake-bpy-module-latest` 也更新到 `20261010`，但它跟随**最新** Blender
+> - 实际装进去的确实是 5.2 那一份：**45 个 `*-stubs` 目录**（bpy / bmesh / mathutils / gpu / ...），
+>   抽查 `attributes` / `GeometryNodeTree` / `interface` / `color_attributes` **全部存在**
+>
+> ⚠️ 两个坑（都踩过）：
+>
+> 1. **pip 走自己的 HTTP 栈，会被 Steam++ 这类 TLS 中间人挡住** —— 表现为 `HTTP 403`
+>    （索引页能读，但下载 wheel 被拒）。绕法：用 PowerShell 从 `files.pythonhosted.org`
+>    直接下 wheel，再 `pip install --no-index <本地 wheel>`。
+> 2. **wheel 的文件名是元数据，不能改**。改成别的名字会报
+>    `Invalid wheel filename (wrong number of parts)`。
+> （实测：清华镜像的**索引页能读，但下 wheel 时返回 403**；这次是从官方 PyPI 下成功的。
+> 所以上面那条命令故意不带镜像参数。）
 
 **不装也完全能开发**——用第 4 节的写法在运行时查：
 

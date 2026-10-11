@@ -19,6 +19,9 @@
 > **想装上它？** → [INSTALL.md](INSTALL.md)
 > 单文件库：复制进 Blender 的 `scripts/modules` 就能 `import`，卸载 = 删掉那个文件，零依赖。
 > （或者不装 —— 每个练习脚本都能就地运行。）
+>
+> **想知道那些架构结论怎么来的？** → `verify_architecture.py`
+> 把文档里标 ✅ 的声明逐条变成**可重跑的检查**，输出 PASS / PARTIAL / FAIL + 原始证据。
 
 ## 动手前先报身份
 

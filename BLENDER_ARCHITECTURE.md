@@ -37,7 +37,7 @@
 
 ## 1. 数据层：ID 与 Main
 
-### 1.1 所有顶层数据都是 ID 📖
+### 1.1 所有顶层数据都是 ID ✅
 
 Object、Mesh、Material、Scene、Action、NodeTree……在 C 里都是 `ID`。它们共享同一套头部
 （名字、引用计数、库归属、运行时标记）。
@@ -51,7 +51,7 @@ Object 3 · Scene 1 · Screen 11 · WindowManager 1 · Workspace 11 · World 1 .
 
 注意 `Screen 11` / `Workspace 11` —— **UI 布局本身也是 ID**，也被存进 `.blend`。
 
-### 1.2 Main 是数据库 📖
+### 1.2 Main 是数据库 ✅
 
 所有 ID 挂在 `Main` 的若干链表上，这就是 `bpy.data` 背后的东西。`bpy.data.objects` 之类的
 集合，是这些链表的视图。
@@ -113,7 +113,7 @@ Object 3 · Scene 1 · Screen 11 · WindowManager 1 · Workspace 11 · World 1 .
 如果 DNA 回答"内存里是什么形状"，RNA 回答"**这东西叫什么名字、怎么访问**"。
 它是 C 数据与外部世界之间唯一的翻译层。
 
-### 2.2 它同时服务四个消费者 📖
+### 2.2 它同时服务四个消费者 ✅
 
 | 消费者 | 怎么用 RNA |
 |---|---|
@@ -268,7 +268,7 @@ C 层做一次 memcpy。
 
 ## 5. 撤销：memfile 全量快照
 
-### 5.1 机制 📖
+### 5.1 机制 ✅
 
 全局撤销把**整个 Main 数据库序列化**到内存，而不是记录差异。栈是一个**环形缓冲**。
 
@@ -329,7 +329,7 @@ GHOST 是平台抽象层：把 Win32 / X11 / Wayland / Cocoa 的窗口、输入�
 
 ## 7. 文件层：blenloader
 
-### 7.1 `.blend` ≈ 内存转储 📖
+### 7.1 `.blend` ≈ 内存转储 ✅
 
 配合 DNA 的结构描述表，写入时记录"哪些结构体、哪些指针"，读取时重映射指针。
 这就是 Blender 能秒开大场景、也能打开十几年前文件的原因。
@@ -343,7 +343,7 @@ GHOST 是平台抽象层：把 Win32 / X11 / Wayland / Cocoa 的窗口、输入�
 
 ## 8. 节点系统
 
-### 8.1 一套框架，多个编辑器 📖
+### 8.1 一套框架，多个编辑器 ✅
 
 材质节点、几何节点、合成节点、纹理节点共享同一套 `NodeTree` 框架：
 `nodes.new()` / `links.new()`。区别只在注册了哪些节点类型。
@@ -370,7 +370,7 @@ GHOST 是平台抽象层：把 Win32 / X11 / Wayland / Cocoa 的窗口、输入�
 
 ## 9. Python 集成
 
-### 9.1 CPython 内嵌 📖
+### 9.1 CPython 内嵌 ✅
 
 Blender 内嵌一个完整的 CPython（本机是 3.13.13），并带 numpy。所以 Python 侧
 就是普通 Python——可以 `import ctypes` / `subprocess` / `socket`。
@@ -466,8 +466,17 @@ for p in obj.bl_rna.properties:
 
 标注约定：
 
-- **📖** = 来自 Blender 公开源码结构，未在本机逐行验证
-- 未标注 = 本机实测
+- **✅** = 本机实测通过，可用 `verify_architecture.py` **重跑复现**
+- **📖** = 来自公开源码结构，本机只能**间接**验证（目前仅 §6.2 GHOST 一条）
+- 未标注 = 本机实测（数据形式）
+
+> **想自己复现上面的结论**：
+> ```powershell
+> blender.exe --background --factory-startup --python verify_architecture.py
+> ```
+> 逐条输出 `PASS` / `PARTIAL` / `FAIL` / `SKIP` 加原始证据（JSON）。
+> ⚠️ **§5.1 撤销**那条需要 GUI 会话（无头模式下 `bpy.ops.ed.undo.poll()` 为假，会 SKIP）——
+> 去掉 `--factory-startup` 也不行，实测两种无头启动都不支持。
 
 **两条方法学提醒**（都是踩过的坑）：
 
