@@ -30,9 +30,13 @@
 """
 
 import bpy
+import json
+import time
 import numpy as np
 
 __all__ = [
+    # 反射：describe / snapshot / patch
+    "describe", "describe_text", "snapshot", "patch",
     "positions", "edge_verts", "face_off_corners", "attr_vector", "attr_scalar",
     "set_positions", "transform_mesh", "offset_mesh",
     "mesh_from_arrays", "cube_mesh", "grid_mesh",
@@ -293,6 +297,190 @@ def purge_orphans(recursive=True):
     return bpy.data.orphans_purge(do_local_ids=True, do_linked_ids=True,
                                   do_recursive=recursive)
 
+
+# ------------------------------------------------------------------ 反射
+class Snapshot(dict):
+    """字段快照：一个可 json.dumps 的 dict，额外携带导出瞬间的原始值。
+
+    `.base` 用于 patch() 的冲突检测（「同一字段被两边都改了」）。
+    做成 dict 子类，是为了让调用方直接改值：
+
+        snap = bf.snapshot(obj)
+        snap["location"] = [9, 9, 9]
+        bf.patch(obj, snap)
+    """
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.base = dict(self)
+        self.stamp = None
+        self.skipped = []
+
+
+def _value(v):
+    """RNA 值 -> (可 json / 可写回的值, 是否可逆)。
+
+    实测踩过的坑，都是「看着像数据，其实是个代理对象」：
+      bytes                 list(b'..') 会变成整数列表，必须优先排除
+      bpy_prop_array/Vector 迭代得到数字，可逆
+      IDPropertyGroup       迭代和 JSON 都不行，跳过
+      str                   必须先于「可迭代」判断，否则 "Cube" 变成 ["C","u","b","e"]
+    """
+    if v is None or isinstance(v, (bool, int, str)):
+        return v, True
+    if isinstance(v, float):
+        return round(v, 6), True
+    if isinstance(v, bytes):
+        return None, False
+    try:
+        items = list(v)
+    except TypeError:
+        return None, False
+    out = []
+    for x in items:
+        if isinstance(x, (bool, int, str)):
+            out.append(x)
+        elif isinstance(x, float):
+            out.append(round(x, 6))
+        else:
+            return None, False
+    return out, True
+
+
+def snapshot(idblock):
+    """当前值 -> Snapshot（只含可写且可逆的字段）。
+
+    几何不在里面：顶点/面是二进制缓冲，20 万顶点文本化要 3.2 MB / 245 ms。
+    几何请走 positions() / set_positions() 那条通道。
+    """
+    snap = Snapshot()
+    for p in idblock.bl_rna.properties:
+        i = p.identifier
+        if i == "rna_type" or p.is_readonly:
+            continue
+        if p.type not in ("BOOLEAN", "INT", "FLOAT", "STRING", "ENUM"):
+            continue
+        try:
+            v = getattr(idblock, i)
+        except Exception:
+            snap.skipped.append((i, "read failed"))
+            continue
+        val, ok = _value(v)
+        if ok:
+            snap[i] = val
+        else:
+            snap.skipped.append((i, type(v).__name__))
+    snap.stamp = time.time()
+    snap.base = dict(snap)
+    return snap
+
+
+def describe(idblock, writable_only=False):
+    """RNA schema -> 能力清单。这是 Blender 内置的「说明书」。
+
+    实测 Object 的 164 个属性里 149 个带 description（91%）：能写什么、
+    什么类型、什么范围、枚举怎么拼、这个值什么意思，都可以读出来，
+    不必让模型去背 API。
+    """
+    out = {}
+    for p in idblock.bl_rna.properties:
+        i = p.identifier
+        if i == "rna_type" or (writable_only and p.is_readonly):
+            continue
+        d = {"name": p.name, "type": p.type, "readonly": p.is_readonly}
+        if p.description:
+            d["doc"] = p.description
+        try:
+            if p.subtype and p.subtype != "NONE":
+                d["subtype"] = p.subtype
+        except Exception:
+            pass
+        if p.type == "ENUM":
+            d["options"] = [e.identifier for e in p.enum_items]
+        elif p.type in ("FLOAT", "INT"):
+            try:
+                d["range"] = [p.hard_min, p.hard_max]
+            except Exception:
+                pass
+        out[i] = d
+    return out
+
+
+def describe_text(idblock, writable_only=True):
+    """describe() 的紧凑文本版 —— 比 JSON 省很多 token。"""
+    lines = []
+    for i, d in describe(idblock, writable_only=writable_only).items():
+        bits = [i, d["type"]]
+        if d["readonly"]:
+            bits.append("ro")
+        if "subtype" in d:
+            bits.append("subtype=" + d["subtype"])
+        if "range" in d:
+            bits.append("range=[%g,%g]" % tuple(d["range"]))
+        if "options" in d:
+            bits.append("options=" + "|".join(d["options"]))
+        lines.append("  ".join(bits))
+        if d.get("doc"):
+            lines.append("      " + d["doc"])
+    return "\n".join(lines)
+
+
+_UNSET = object()
+
+
+def _same(a, b):
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def patch(idblock, edited, base=_UNSET, on_conflict="raise"):
+    """把 edited 里「相对 base 变化过」的字段写回去。
+
+    只应用变化字段，所以 AI 没碰过的东西 —— 包括你刚在 Blender 里手改的 ——
+    不会被抹掉。实测：全量覆盖会把用户改的 rotation 抹回原值，diff 应用则保留。
+
+    base 省略时取 edited.base（snapshot() 带回来的）。
+    on_conflict:
+      "raise"  有冲突就抛异常，且一个字段都不写（原子，默认）
+      "skip"   跳过冲突字段，写其余
+      "force"  冲突也覆盖
+    """
+    if base is _UNSET:
+        base = getattr(edited, "base", None)
+    if base is None:
+        raise ValueError(
+            "patch: 缺少 base，无法区分「AI 改的」和「外部改的」。"
+            "请传 snapshot() 的返回值；确实要全量覆盖时显式给 base={}")
+
+    current = snapshot(idblock)
+    changed = {k: v for k, v in edited.items()
+               if not (k in base and _same(v, base[k]))}
+    if base:
+        conflicts = [k for k in changed
+                     if k in current and not _same(current[k], base.get(k))]
+    else:
+        conflicts = []          # 显式 base={} = 放弃冲突检测
+
+    if conflicts and on_conflict == "raise":
+        raise RuntimeError(
+            "patch: %d 个字段在导出后被外部改过，而 AI 也要改它们：%s。"
+            "什么都没写。改用 on_conflict='skip' 跳过，或 'force' 强行覆盖"
+            % (len(conflicts), ", ".join(sorted(conflicts))))
+
+    applied, skipped = [], []
+    for k, v in changed.items():
+        if k not in current:
+            skipped.append(k)
+            continue
+        if k in conflicts and on_conflict == "skip":
+            skipped.append(k)
+            continue
+        try:
+            setattr(idblock, k, v)
+            applied.append(k)
+        except Exception:
+            skipped.append(k)
+    return {"applied": applied, "skipped": skipped,
+            "conflicts": conflicts, "changed": sorted(changed)}
 
 # ------------------------------------------------------------------ 事务
 class Edit(object):

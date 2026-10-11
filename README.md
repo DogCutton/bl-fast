@@ -126,6 +126,47 @@ with bf.Edit("ai: scatter cubes"):      # undo=True 默认
 **undo 本身不是事务**，它不会在异常时自己回滚，所以才有 `rollback_on_error`。
 实测：块内把值改到 9.0 后抛异常，回滚后读回 0.0（`rolled_back=True, committed=False`）。
 
+### 反射：让 AI 看见「能做什么」和「现在是什么」
+
+Blender 内置了说明书 —— 实测 Object 的 164 个属性里 **149 个带 description（91%）**，
+只算可写字段则是 **106/109（97%）**。所以 AI 不必背 API，读出来就行。
+
+| 函数 | 作用 | 实测规模 |
+|---|---|---|
+| `describe(idblock, writable_only=False)` | 能力清单：类型/范围/枚举/文档 | 109 个可写字段 |
+| `describe_text(idblock, writable_only=True)` | 上者的紧凑文本版 | 219 行 / 11.6 KB |
+| `snapshot(idblock)` | 当前值 → 可编辑的 `Snapshot` | 99 字段 / **2.9 KB** |
+| `patch(idblock, edited, on_conflict="raise")` | 只写回**变化过**的字段 | — |
+
+```python
+# 看得见状态
+print(bf.describe_text(obj, writable_only=True))   # 能改什么、怎么改
+
+snap = bf.snapshot(obj)                            # 现在是什么（2.9 KB）
+snap["location"] = [9, 9, 9]                       # 直接改
+bf.patch(obj, snap)                                # 只同步这一个字段
+```
+
+**`snapshot` 会自动跳过不可逆的字段** —— 实测它丢掉了 4 个 `Matrix`
+（`matrix_world` / `matrix_local` / `matrix_basis` / `matrix_parent_inverse`），
+因为它们是派生数据，写回去也会被覆盖。
+
+### 冲突检测（必须用，不能省）
+
+`patch` 默认 `on_conflict="raise"`：**先检测全部，有冲突就抛异常、一个字段都不写**。
+
+| 策略 | 冲突时行为 | 实测 |
+|---|---|---|
+| `"raise"` | 抛异常，不写任何字段 | rotation 保持用户设的 `0.5` |
+| `"skip"` | 跳过冲突字段，写其余 | `skipped: ["rotation_euler"]` |
+| `"force"` | 冲突也覆盖 | 覆盖成 AI 的 `1,1,1` |
+
+**关键**：AI 改 A、你改 B 时**不会**误报冲突 —— 实测 `conflicts: []`，
+AI 的 location 生效，你的 rotation 原样保留。
+
+**反面教训**（实测对比）：不做 diff 的全量覆盖会把用户改的 rotation **抹回原值**，
+而且没有任何提示。
+
 ## 用法
 
 ```python
@@ -283,6 +324,10 @@ with bf.Edit("ai: ...", redraw=False):    # 后台任务可以关掉
   正确的规则不是"永远别用 ops"，而是"**ops 只用在数据层没有替代的地方**"。
 - **编辑模式下改顶点会被静默丢弃**：`set_positions` 已加守卫（抛 `RuntimeError`）。
   编辑期间几何归 BMesh 所有，必须改用 `bmesh` 或先退出编辑模式。
+- **`snapshot` 只覆盖参数层**，不含几何（顶点/面是二进制缓冲，20 万顶点文本化要
+  3.2 MB / 245 ms）。几何请走 `positions()` / `set_positions()`。
+- **`describe_text` 不小**：一个 Object 是 219 行 / 11.6 KB（约 3k tokens）。
+  只要字段名和类型时可以自己筛一遍 `describe()` 的返回值。
 - **`mesh_from_arrays` 要求等长面**（全三角或全四边）。混合拓扑得走 bmesh。
 - **校验是选择性的**：`set_positions` 只校验**形状**（拦住静默错误），
   要证明数值真的写进去了得用 `set_positions_checked`（多一次 memcpy）。
