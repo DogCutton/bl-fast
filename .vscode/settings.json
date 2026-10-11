@@ -1,0 +1,42 @@
+{
+  // VSCode + Blender 开发配置
+  // 扩展：jacqueslucke.blender-development（已安装）
+  //
+  // 用法：
+  //   1. 用 VSCode 打开 tools/bl-fast 这个文件夹
+  //   2. Ctrl+Shift+P -> "Blender: Start"
+  //   3. 打开 examples/ 里的任意脚本 -> Ctrl+Shift+P -> "Blender: Run Script"
+  //
+  // 注意：扩展启动的是**它自己管理的 Blender 实例**（带调试端口），
+  // 和你手动开后连着 MCP 的那个是两回事。两者可以同时存在。
+
+  "blender.executables": [
+    {
+      "path": "E:\\制冰\\Blender\\Blender 5.2\\blender.exe",
+      "name": "Blender 5.2.1 LTS",
+      "args": []
+    }
+  ],
+
+  // examples/ 里的脚本可以在扩展的 "Open Scripts Folder" 里直接看到
+  "blender.scripts.directories": ["examples"],
+
+  // 保存插件源码时自动重载（做 addon 开发时有用）
+  "blender.addon.reloadOnSave": false,
+
+  // Blender 的脚本目录，给 Pylance 一点线索（bpy 本身仍需要 fake-bpy-module 才有补全）
+  "python.analysis.extraPaths": [
+    "E:\\制冰\\Blender\\Blender 5.2\\5.2\\scripts\\modules",
+    "E:\\制冰\\Blender\\Blender 5.2\\5.2\\scripts\\startup"
+  ],
+
+  // 源码统一 UTF-8 + LF（避免中文注释在 Blender 里变乱码）
+  "files.encoding": "utf8",
+  "files.eol": "\n",
+
+  // 这个项目用的是 4 空格缩进
+  "[python]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  }
+}

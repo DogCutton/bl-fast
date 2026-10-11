@@ -503,10 +503,15 @@ class Edit(object):
 
     退出时会强制刷新界面（redraw=True）：数据层修改不会自动设置重绘标记，
     不刷新的话你的视口会停在旧画面上，直到有事件（鼠标移动等）路过。
+
+    ⚠️ **撤销能力是运行环境相关的**：实测在 `--background` 无头进程里，
+    `bpy.ops.ed.undo()` 的 poll 会失败（"context is incorrect"）。
+    所以进入时会探测一次，探测不到就明确降级 —— 块内出错时**不会假装回滚**。
+    调用方可以看 `ed.undo_available` 与 `ed.rollback_failed`。
     """
 
     __slots__ = ("label", "undo", "rollback_on_error", "verify", "redraw",
-                 "committed", "rolled_back")
+                 "committed", "rolled_back", "undo_available", "rollback_failed")
 
     def __init__(self, label="ai edit", undo=True, rollback_on_error=True,
                  verify=None, redraw=True):
@@ -516,12 +521,23 @@ class Edit(object):
         self.verify = verify
         self.committed = False
         self.rolled_back = False
+        self.undo_available = None      # 进入时探测
+        self.rollback_failed = False
         self.redraw = redraw
 
     def __enter__(self):
         # 在编辑之前 push：这是「编辑前状态」的唯一精确还原点。
+        # 但 undo 依赖上下文，所以这里探测一次而不是等出错才发现。
+        self.undo_available = False
         if self.undo:
-            bpy.ops.ed.undo_push(message="before: " + self.label)
+            try:
+                # poll() 提前告知 undo 是否真的可用（无头进程里它是 False）
+                if not bpy.ops.ed.undo.poll():
+                    raise RuntimeError("undo.poll() 为假")
+                bpy.ops.ed.undo_push(message="before: " + self.label)
+                self.undo_available = True
+            except Exception:
+                self.undo_available = False
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -540,9 +556,15 @@ class Edit(object):
         return False
 
     def _rollback(self):
-        if self.rollback_on_error and self.undo:
-            bpy.ops.ed.undo()
-            self.rolled_back = True
+        # 回滚失败**不能**抛新异常 —— 那会把调用方真正关心的原始错误替换掉。
+        # 实测：无头进程里 bpy.ops.ed.undo() poll 失败，结果调用方看到的
+        # 不是「故意失败」，而是 "Operator bpy.ops.ed.undo.poll() failed"。
+        if self.rollback_on_error and self.undo_available:
+            try:
+                bpy.ops.ed.undo()
+                self.rolled_back = True
+            except Exception:
+                self.rollback_failed = True
         bpy.context.view_layer.update()
         self._notify_ui()
 

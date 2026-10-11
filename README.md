@@ -11,6 +11,10 @@
 > **Blender 架构入门** → [BLENDER_ARCHITECTURE.md](BLENDER_ARCHITECTURE.md)
 > 从「数据在哪 / 什么时候被算 / 什么时候被画」三个问题出发，讲 Blender 本身怎么运作。
 > 适合想理解机制、而不是只想调 API 的读者。
+>
+> **想自己动手？** → [GETTING_STARTED.md](GETTING_STARTED.md)
+> 三条路（VSCode 扩展 / Blender 内建 / 命令行）+ 四个可跑练习 + 七个实测踩出来的坑。
+> 你的 VSCode 已经装好 `jacqueslucke.blender-development`，开箱可用。
 
 ## 动手前先报身份
 
